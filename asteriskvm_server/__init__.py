@@ -10,6 +10,8 @@ import configparser
 import logging
 import subprocess
 import json
+import time
+import queue
 
 from threading import Thread
 
@@ -140,6 +142,7 @@ class WatchMailBox(Thread):
         self.inot = inotify.adapters.Inotify()
         for subdir in self.subdirs:
             directory = os.path.join(self.path, subdir)
+            logging.debug("Watching Directory: %s", directory)
             self.inot.add_watch(directory.encode('utf-8'))
 
     def _save_cache(self):
@@ -163,7 +166,7 @@ class WatchMailBox(Thread):
         logging.debug("Parsed %s --> %s", fname, txt)
         return txt
 
-    def _get_mbox_status(self):
+    def get_mbox_status(self):
         """Parse all messages ina mailbox"""
         data = {}
         for subdir in self.subdirs:
@@ -184,7 +187,7 @@ class WatchMailBox(Thread):
                 elif ext == '.wav':
                     data[basename]['sha'] = _sha256(filename)
                     data[basename]['wav'] = filename
-        for fname, ref in data.items():
+        for fname, ref in list(data.items()):
             if 'info' not in ref or 'sha' not in ref or not os.path.isfile(fname + '.wav'):
                 logging.debug('Message is not complete: ' + fname)
                 del data[fname]
@@ -201,76 +204,120 @@ class WatchMailBox(Thread):
 
     def run(self):
         """Main Loop"""
-        status = self._get_mbox_status()
-        self.mbox_queue.put(status)
+        self.mbox_queue.put("rebuild")
+        trigger_events = ('IN_DELETE', 'IN_CLOSE_WRITE', 'IN_MOVED_FROM', 'IN_MOVED_TO')
+        rebuild = False
         try:
             for event in self.inot.event_gen():
                 if event is not None:
                     (_header, type_names, _watch_path, _filename) = event
-                    if type_names in ('IN_DELETE', 'IN_CLOSE_WRITE',
-                                      'IN_MOVED_FROM', 'IN_MOVED_TO'):
-                        status = self._get_mbox_status()
-                        self.mbox_queue.put(status)
+                    if set(type_names) & set(trigger_events):
+                        rebuild = True
+                else:
+                    if rebuild:
+                        logging.debug("Rebuilding mailbox due to event: %s", type_names)
+                        self.mbox_queue.put("rebuild")
+                    rebuild = False
         finally:
             for subdir in self.subdirs:
                 directory = os.path.join(self.path, subdir)
                 self.inot.remove_watch(directory.encode('utf-8'))
 
-# pylint: disable=too-many-locals
-def main():
-    """Main thread"""
-    logging.basicConfig(format="%(levelname)-10s %(message)s", level=logging.DEBUG)
-
-    if len(sys.argv) != 2:
-        print("Must specify configuration file")
-        sys.exit()
+def _config(fname):
     config = configparser.ConfigParser()
-    config.read(sys.argv[1])
+    config.read(fname)
+    config = config["default"]
+    opts = {}
+    password = config.get('password')
+    opts['password'] = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    opts['port'] = config.getint('port', 12345)
+    opts['mbox_path'] = config.get('mbox_path')
+    opts['cache_file'] = config.get('cache_file', 'asteriskvm.pkl')
+    opts['google_key'] = config.get('google_key')
+    opts['ipaddr'] = config.get('ipaddr', '')
+    opts['min_interval'] = config.getint('min_interval', 10)
+    return opts
 
-    password = config.get('default', 'password')
-    password = hashlib.sha256(password.encode('utf-8')).hexdigest()
-
+def _setup_socket(host, port):
     soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        soc.bind(('', config.getint('default', 'port')))
+        soc.bind((host, port))
     except socket.error:
         logging.exception('Bind failed.')
         sys.exit()
     soc.listen(10)
+    return soc
+
+def _connection(soc, clients, password, status):
+    """Setup a new connection"""
+    conn, addr = soc.accept()
+    ipaddr, port = str(addr[0]), str(addr[1])
+    logging.info('Accepting connection from ' + ipaddr + ':' + port)
+
+    try:
+        que = PollableQueue()
+        thread = Connection(conn, status, que, password)
+        thread.setDaemon(True)
+        thread.start()
+        clients.append((thread, que))
+    except Exception: # pylint: disable=broad-except
+        logging.exception("Terible error!")
+
+def main():
+    """Main thread."""
+    logging.basicConfig(format="%(levelname)-10s %(message)s", level=logging.DEBUG)
+    if len(sys.argv) != 2:
+        print("Must specify configuration file")
+        return
+
+
+    opts = _config(sys.argv[1])
+    soc = _setup_socket(opts['ipaddr'], opts['port'])
 
     mbox_queue = PollableQueue()
     mailbox = WatchMailBox(mbox_queue,
-                           config.get('default', 'mbox_path'),
-                           config.get('default', 'cache_file'),
-                           {'GOOGLE_KEY': config.get('default', 'google_key')})
+                           opts['mbox_path'],
+                           opts['cache_file'],
+                           {'GOOGLE_KEY': opts['google_key']})
     mailbox.setDaemon(True)
     mailbox.start()
 
     clients = []
     status = {}
+    timeout = 0
+    last_time = 0
     while True:
-        readable, dummy_writable, dummy_errored = select.select([soc, mbox_queue], [], [])
-        if soc in readable:
-            conn, addr = soc.accept()
-            ipaddr, port = str(addr[0]), str(addr[1])
-            logging.info('Accepting connection from ' + ipaddr + ':' + port)
+        readable, dummy_writable, dummy_errored = select.select([soc, mbox_queue], [], [], timeout)
 
-            try:
-                que = PollableQueue()
-                thread = Connection(conn, status, que, password)
-                thread.setDaemon(True)
-                thread.start()
-                clients.append((thread, que))
-            except Exception: # pylint: disable=broad-except
-                logging.exception("Terible error!")
+        if soc in readable:
+            _connection(soc, clients, opts['password'], status)
+
         clients = [(thread, que) for thread, que in clients if thread.isAlive()]
+        read_mbox = False
+
         if mbox_queue in readable:
-            status = mbox_queue.get()
-            for thread, que in clients:
-                que.put(status)
+            mbox_queue.get()
             mbox_queue.task_done()
+            if not timeout:
+                if time.time() - last_time < opts['min_interval']:
+                    last_time = time.time()
+                    timeout = opts['min_interval']
+                else:
+                    read_mbox = True
+        if timeout:
+            if time.time() - last_time >= opts['min_interval']:
+                read_mbox = True
+            else:
+                timeout = last_time + opts['min_interval'] - time.time()
+        if read_mbox:
+            status = mailbox.get_mbox_status()
+            for _thread, que in clients:
+                que.put(status)
+            last_time = time.time()
+            timeout = 0
+
     soc.close()
 
 
