@@ -1,0 +1,7 @@
+[default]
+host = 127.0.0.1
+port = 12345
+password = This is my password
+mbox_path = /var/spool/asterisk/voicemail/default/vm/
+cache_file = stt.pkl
+google_key = <40 charachter API key>
