@@ -1,0 +1,3 @@
+inotify
+SpeechRecognition
+asteriskvm
