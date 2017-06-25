@@ -12,6 +12,7 @@ import subprocess
 import json
 import time
 import queue
+import argparse
 
 from threading import Thread
 
@@ -265,15 +266,19 @@ def _connection(soc, clients, password, status):
     except Exception: # pylint: disable=broad-except
         logging.exception("Terible error!")
 
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfg", help="Path to configuration file")
+    parser.add_argument("-v", "--verbose", help="Turn on debug logging", action='store_true')
+    return parser.parse_args()
+
 def main():
     """Main thread."""
-    logging.basicConfig(format="%(levelname)-10s %(message)s", level=logging.DEBUG)
-    if len(sys.argv) != 2:
-        print("Must specify configuration file")
-        return
+    args = _parse_args()
 
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
-    opts = _config(sys.argv[1])
+    opts = _config(args.cfg)
     soc = _setup_socket(opts['ipaddr'], opts['port'])
 
     mbox_queue = PollableQueue()

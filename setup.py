@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'asteriskvm_server',
   packages=find_packages(),
-  version = '0.2.1',
+  version = '0.2.2',
   description = 'The server portion of a client/server to interact with Asterisk voicemail mailboxes',
   long_description=open('README.rst').read(),
   author = 'PhracturedBlue',
