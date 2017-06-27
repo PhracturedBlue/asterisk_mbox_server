@@ -23,24 +23,24 @@ def find_version(*file_paths):
     raise RuntimeError("Unable to find version string.")
 
 setup(
-  name = 'asteriskvm_server',
+  name = 'asterisk_mbox_server',
   packages=find_packages(),
-  version=find_version("asteriskvm_server", "__init__.py"),
+  version=find_version("asterisk_mbox_server", "__init__.py"),
   description = 'The server portion of a client/server to interact with Asterisk voicemail mailboxes',
   long_description=open('README.rst').read(),
   author = 'PhracturedBlue',
   author_email = 'rc2012@pblue.org',
-  url = 'https://github.com/PhracturedBlue/asteriskvm_server', # use the URL to the github repo
-  keywords = ['testing', 'asterisk'], # arbitrary keywords
+  url = 'https://github.com/PhracturedBlue/asterisk_mbox_server', # use the URL to the github repo
+  keywords = ['testing', 'asterisk' 'mailbox', 'voicemail'], # arbitrary keywords
   classifiers = [],
   install_requires=[
         "inotify",
         "SpeechRecognition",
-        "asteriskvm",
+        "asterisk_mbox",
    ],
    entry_points = {
         'console_scripts': [
-            'asteriskvm-server = asteriskvm_server:main'
+            'asterisk-mbox-server = asterisk_mbox_server:main'
         ]
    },
 

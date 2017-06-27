@@ -1,4 +1,4 @@
-""" asteriskvm_server.py -- Do stuff"""
+""" asterisk_mbox_server.py -- Do stuff"""
 
 import sys
 import os
@@ -19,8 +19,8 @@ from threading import Thread
 import speech_recognition as sr
 import inotify.adapters
 
-import asteriskvm.commands as cmd
-from asteriskvm.utils import PollableQueue, recv_blocking, encode_password, compare_password
+import asterisk_mbox.commands as cmd
+from asterisk_mbox.utils import PollableQueue, recv_blocking, encode_password, compare_password
 
 __version__ = "0.3.0"
 
@@ -248,7 +248,7 @@ def _config(fname):
     opts['password'] = encode_password(password)
     opts['port'] = config.getint('port', 12345)
     opts['mbox_path'] = config.get('mbox_path')
-    opts['cache_file'] = config.get('cache_file', 'asteriskvm.pkl')
+    opts['cache_file'] = config.get('cache_file', 'asteriskmbox.pkl')
     opts['google_key'] = config.get('google_key')
     opts['ipaddr'] = config.get('ipaddr', '')
     opts['min_interval'] = config.getint('min_interval', 10)
