@@ -20,7 +20,9 @@ import speech_recognition as sr
 import inotify.adapters
 
 import asteriskvm.commands as cmd
-from asteriskvm.utils import PollableQueue, recv_blocking
+from asteriskvm.utils import PollableQueue, recv_blocking, encode_password, compare_password
+
+__version__ = "0.2.3"
 
 def _parse_request(msg):
     """Parse request from client"""
@@ -71,11 +73,16 @@ class Connection(Thread):
 
     def _handle_request(self, request):
         if request['cmd'] == cmd.CMD_MESSAGE_PASSWORD:
-            self.accept_pw = self.password == request['sha']
-            logging.info("Password accepted")
-        if not self.accept_pw:
-            logging.warning("Password rejected")
-            self._send(cmd.CMD_MESSAGE_PASSWORD, b'FAIL')
+            self.accept_pw, msg = compare_password(self.password, request['sha'])
+            if self.accept_pw:
+                self._send(cmd.CMD_MESSAGE_VERSION, __version__.encode('utf-8'))
+                logging.info("Password accepted")
+            else:
+                self._send(cmd.CMD_MESSAGE_PASSWORD, msg.encode('utf-8'))
+                logging.warning("Password rejected: %s", msg)
+        elif not self.accept_pw:
+            logging.warning("Bad Password")
+            self._send(cmd.CMD_MESSAGE_PASSWORD, b'bad password')
         elif request['cmd'] == cmd.CMD_MESSAGE_LIST:
             logging.debug("Requested Message List")
             self._send(cmd.CMD_MESSAGE_LIST, json.dumps(self.status).encode('utf-8'))
@@ -230,7 +237,7 @@ def _config(fname):
     config = config["default"]
     opts = {}
     password = config.get('password')
-    opts['password'] = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    opts['password'] = encode_password(password)
     opts['port'] = config.getint('port', 12345)
     opts['mbox_path'] = config.get('mbox_path')
     opts['cache_file'] = config.get('cache_file', 'asteriskvm.pkl')
