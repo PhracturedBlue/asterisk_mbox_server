@@ -22,7 +22,7 @@ import inotify.adapters
 import asteriskvm.commands as cmd
 from asteriskvm.utils import PollableQueue, recv_blocking, encode_password, compare_password
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 def _parse_request(msg):
     """Parse request from client"""
@@ -62,6 +62,14 @@ class Connection(Thread):
                 return fname
         return None
 
+    def _build_list(self):
+        """Send a sanitized list to the client"""
+        result = []
+        blacklist = ["wav"]
+        for _k, ref in self.status.items():
+            result.append({key : val for key, val in ref.items() if key not in blacklist})
+        return result
+
     def _send(self, command, msg):
         """Send message prefixed by length"""
         msglen = len(msg)
@@ -85,13 +93,13 @@ class Connection(Thread):
             self._send(cmd.CMD_MESSAGE_PASSWORD, b'bad password')
         elif request['cmd'] == cmd.CMD_MESSAGE_LIST:
             logging.debug("Requested Message List")
-            self._send(cmd.CMD_MESSAGE_LIST, json.dumps(self.status).encode('utf-8'))
+            self._send(cmd.CMD_MESSAGE_LIST, json.dumps(self._build_list()).encode('utf-8'))
         elif request['cmd'] == cmd.CMD_MESSAGE_MP3:
             fname = self._sha_to_fname(request['sha'])
             logging.debug("Requested MP3 for %s ==> %s", request['sha'], fname)
             msg = b''
             if fname:
-                msg = _mp3(fname + ".wav")
+                msg = _mp3(self.status[fname]['wav'])
             self._send(cmd.CMD_MESSAGE_MP3, msg)
 
     def run(self):
@@ -189,14 +197,14 @@ class WatchMailBox(Thread):
                 basename, ext = os.path.splitext(filename)
                 logging.debug('Parsing: %s -- %s', basename, ext)
                 if basename not in data:
-                    data[basename] = {}
+                    data[basename] = {'mbox': subdir}
                 if ext == '.txt':
                     data[basename]['info'] = _parse_msg_header(filename)
                 elif ext == '.wav':
                     data[basename]['sha'] = _sha256(filename)
                     data[basename]['wav'] = filename
         for fname, ref in list(data.items()):
-            if 'info' not in ref or 'sha' not in ref or not os.path.isfile(fname + '.wav'):
+            if 'info' not in ref or 'sha' not in ref or not os.path.isfile(ref['wav']):
                 logging.debug('Message is not complete: ' + fname)
                 del data[fname]
                 continue
@@ -204,7 +212,7 @@ class WatchMailBox(Thread):
             if sha not in self.cache:
                 self.cache[sha] = {}
             if 'txt' not in self.cache[sha]:
-                self.cache[sha]['txt'] = self._speech_to_text(fname + '.wav')
+                self.cache[sha]['txt'] = self._speech_to_text(ref['wav'])
                 self._save_cache()
             logging.debug("SHA (%s): %s", fname, sha)
             ref['text'] = self.cache[sha]['txt']
