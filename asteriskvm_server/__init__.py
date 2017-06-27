@@ -175,7 +175,7 @@ class WatchMailBox(Thread):
         return txt
 
     def get_mbox_status(self):
-        """Parse all messages ina mailbox"""
+        """Parse all messages in a mailbox"""
         data = {}
         for subdir in self.subdirs:
             directory = os.path.join(self.path, subdir)
