@@ -5,8 +5,11 @@ import pickle
 import logging
 import configparser
 import hashlib
+import glob
+import subprocess
+import tempfile
 
-from threading import Thread
+from threading import Thread, Lock
 
 import speech_recognition as sr
 import inotify.adapters
@@ -27,7 +30,10 @@ class WatchMailBox(Thread):
         self.sr_keys = sr_keys
         self.subdirs = ('INBOX', 'Old', 'Urgent')
         self.speech = sr.Recognizer()
+        self.status = {}
         self.cache = {}
+        self.lock = Lock()
+
         if os.path.isfile(stt_file):
             with open(stt_file, 'rb') as infile:
                 self.cache = pickle.load(infile)
@@ -60,6 +66,13 @@ class WatchMailBox(Thread):
         logging.debug("Parsed %s --> %s", fname, txt)
         return txt
 
+    def _sha_to_fname(self, sha):
+        """Find fname from sha256."""
+        for fname in self.status:
+            if sha == self.status[fname]['sha']:
+                return fname
+        return None
+
     @staticmethod
     def _parse_msg_header(fname):
         """Parse asterisk voicemail metadata."""
@@ -80,7 +93,7 @@ class WatchMailBox(Thread):
                 sha.update(chunk)
         return sha.hexdigest()
 
-    def get_mbox_status(self):
+    def _build_mbox_status(self):
         """Parse all messages in a mailbox."""
         data = {}
         for subdir in self.subdirs:
@@ -115,7 +128,71 @@ class WatchMailBox(Thread):
                 self._save_cache()
             logging.debug("SHA (%s): %s", fname, sha)
             ref['text'] = self.cache[sha]['txt']
-        return data
+        self.status = data
+
+    def delete(self, sha):
+        """Delete message from mailbox."""
+        # This does introduce a race condition between
+        # Asterisk resequencing and us deleting, but there isn't
+        # much we can do about it
+        self.lock.acquire()
+        self._build_mbox_status()
+        fname = self._sha_to_fname(sha)
+        for fil in glob.glob(fname + ".*"):
+            os.unlink(fil)
+        dirname = os.path.basename(fname)
+        paths = {}
+        for fil in glob.iglob(os.path.join(dirname + "msg[0-9]*")):
+            base, = os.path.splitext(fil)
+            paths[base] = None
+        last_idx = 0
+        rename = []
+        with tempfile.TemporaryDirectory(dir=dirname) as tmp:
+            for base in sorted(paths):
+                if base != os.path.join(dirname + "msg%04d" % (last_idx)):
+                    for fil in glob.glob(base + ".*"):
+                        ext = os.path.splitext(fil)[1]
+                        newfile = "msg%04d.%s" %(last_idx, ext)
+                        logging.info("Renaming '" + fil + "' to '"
+                                     + os.path.join(dirname, newfile) + "'")
+                        rename.append(newfile)
+                        os.link(fil, os.path.join(tempfile, newfile))
+            for fil in rename:
+                finalname = os.path.join(dirname, fil)
+                if os.path.lexists(finalname):
+                    os.unlink(finalname)
+                os.rename(os.path.join(tmp, fil), finalname)
+        self.lock.release()
+
+    def mp3(self, sha):
+        """Convert WAV to MP3 using LAME."""
+        try:
+            fname = self._sha_to_fname(sha)
+            if not fname:
+                return None
+            logging.debug("Requested MP3 for %s ==> %s",
+                          sha, fname)
+            wav = self.status[fname]['wav']
+            process = subprocess.Popen(["lame", "--abr", "24", "-mm",
+                                        "-h", "-c",
+                                        "--resample", "22.050",
+                                        "--quiet", wav, "-"],
+                                       stdout=subprocess.PIPE)
+            result = process.communicate()[0]
+            return result
+        except OSError:
+            logging.exception("Failed To execute lame")
+            return
+
+    def update(self):
+        """Rebuild mailbox data."""
+        self.lock.acquire()
+        self._build_mbox_status()
+        self.lock.release()
+
+    def get_mbox_status(self):
+        """Return current mbox status."""
+        return self.status
 
     def queue(self):
         """Fetch queue object."""

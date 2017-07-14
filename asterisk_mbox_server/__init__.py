@@ -5,7 +5,6 @@ import socket
 import select
 import configparser
 import logging
-import subprocess
 import json
 import time
 import argparse
@@ -31,31 +30,16 @@ def _parse_request(msg):
     return request
 
 
-def _mp3(fname):
-    """Convert WAV to MP3 using LAME."""
-    try:
-        process = subprocess.Popen(["lame", "--abr", "24", "-mm",
-                                    "-h", "-c",
-                                    "--resample", "22.050",
-                                    "--quiet", fname, "-"],
-                                   stdout=subprocess.PIPE)
-        result = process.communicate()[0]
-        return result
-    except OSError:
-        logging.exception("Failed To execute lame")
-        return
-
-
 class Connection(Thread):
     """Thread to handle a single TCP conection."""
 
-    def __init__(self, conn, status, cdr, password):
+    def __init__(self, conn, mbox, cdr, password):
         """Initialize."""
         # pylint: disable=too-many-arguments
         Thread.__init__(self)
 
         self.conn = conn
-        self.status = status
+        self.mbox = mbox
         self.cdr = cdr
         self.mboxq = PollableQueue()
         self.password = password
@@ -65,44 +49,31 @@ class Connection(Thread):
         """Fetch queue object."""
         return self.mboxq
 
-    def _sha_to_fname(self, sha):
-        """Find fname from sha256."""
-        for fname in self.status:
-            if sha == self.status[fname]['sha']:
-                return fname
-        return None
-
     def _build_msg_list(self):
         """Send a sanitized list to the client."""
         result = []
         blacklist = ["wav"]
-        for _k, ref in self.status.items():
+        status = self.mbox.get_mbox_status()
+        for _k, ref in status.items():
             result.append({key: val for key, val in ref.items()
                            if key not in blacklist})
         return result
 
-    def _sha_to_idx(self, sha):
-        """Decode sha int a pair of numbers."""
-        msg = decode_from_sha(sha)
-        start, end = [int(item) for item in msg.split(b',')]
+    @staticmethod
+    def _build_cdr(cdr_list, start=None, end=None, sha=None):
+        """Extract requested info from cdr list."""
+        if sha is not None:
+            msg = decode_from_sha(sha)
+            start, end = [int(item) for item in msg.split(b',')]
         if start < 0:
             start = 0
-        if start > len(self.cdr):
-            start = len(self.cdr)
-        if end <= 0 or end > len(self.cdr):
-            end = len(self.cdr)
+        if start >= len(cdr_list):
+            return []
+        if end <= 0 or end > len(cdr_list):
+            end = len(cdr_list)
         if end < start:
             end = start
-        return start, end
-
-    def _build_cdr(self, start, end):
-        """Extract requested info from cdr list."""
-        cdr = self.cdr
-        if start >= len(cdr):
-            return []
-        if end > len(cdr):
-            end = len(cdr)
-        return cdr[start:end]
+        return cdr_list[start:end]
 
     def _send(self, command, msg):
         """Send message prefixed by length."""
@@ -132,11 +103,8 @@ class Connection(Thread):
             self._send(cmd.CMD_MESSAGE_LIST,
                        json.dumps(self._build_msg_list()).encode('utf-8'))
         elif request['cmd'] == cmd.CMD_MESSAGE_MP3:
-            fname = self._sha_to_fname(request['sha'])
-            if fname:
-                logging.debug("Requested MP3 for %s ==> %s",
-                              request['sha'], fname)
-                msg = _mp3(self.status[fname]['wav'])
+            msg = self.mbox.mp3(request['sha'])
+            if msg:
                 self._send(cmd.CMD_MESSAGE_MP3, msg)
             else:
                 logging.warning("Couldn't find message for %s", request['sha'])
@@ -144,10 +112,10 @@ class Connection(Thread):
                            "Could not find requested message")
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR_AVAILABLE:
             self._send(cmd.CMD_MESSAGE_CDR_AVAILABLE,
-                       json.dumps({'count': len(self.cdr)}))
+                       json.dumps({'count': len(self.cdr.get_cdr_status())}))
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR:
-            from_idx, to_idx = self._sha_to_idx(request['sha'])
-            msg = self._build_cdr(from_idx, to_idx)
+            cdr_list = self.cdr.get_cdr_status()
+            msg = self._build_cdr(cdr_list, sha=request['sha'])
             self._send(cmd.CMD_MESSAGE_CDR,
                        json.dumps(msg).encode('utf-8'))
 
@@ -165,16 +133,17 @@ class Connection(Thread):
                 self._handle_request(request)
 
             if self.mboxq in readable:
-                msgtype, data = self.mboxq.get()
+                msgtype = self.mboxq.get()
                 self.mboxq.task_done()
                 if msgtype == 'mbox':
-                    self.status = data
                     self._send(cmd.CMD_MESSAGE_LIST,
-                               json.dumps(self.status).encode('utf-8'))
+                               json.dumps(self._build_msg_list())
+                               .encode('utf-8'))
                 elif msgtype == 'cdr':
-                    self.cdr = data
+                    cdr_len = len(self.cdr.get_cdr_list())
                     self._send(cmd.CMD_MESAGE_CDR_AVAILABLE,
-                               json.dumps({'count': len(self.cdr)}))
+                               json.dumps({'count': cdr_len})
+                               .encode('utf-8'))
 
 
 class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
@@ -201,8 +170,6 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
         self._cdr.start()
 
         self._clients = []
-        self._status = {}
-        self._cdr_list = []
 
     @staticmethod
     def _config(fname):
@@ -250,7 +217,7 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
         logging.info('Accepting connection from ' + ipaddr + ':' + port)
 
         try:
-            thread = Connection(conn, self._status, self._cdr_list,
+            thread = Connection(conn, self._mailbox, self._cdr,
                                 self._opts['password'])
             thread.setDaemon(True)
             thread.start()
@@ -263,9 +230,8 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
         queue = self._cdr.queue()
         queue.get()
         queue.task_done()
-        self._cdr_list = self._cdr.get_cdr_status()
         for thread in self._clients:
-            thread.queue().put(['cdr', self._cdr_list])
+            thread.queue().put('cdr')
 
     def _handle_mbox_update(self, timeout, last_time, readable):
         """Read Mailbox update."""
@@ -286,9 +252,9 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
             else:
                 timeout = last_time + self._opts['min_interval'] - time.time()
         if read_mbox:
-            self._status = self._mailbox.get_mbox_status()
+            self._mailbox.update()
             for thread in self._clients:
-                thread.queue().put(['mbox', self._status])
+                thread.queue().put('mbox')
             last_time = time.time()
             timeout = 0
         return timeout, last_time
