@@ -164,7 +164,7 @@ class WatchMailBox(Thread):
         self.path = path
         self.stt_file = stt_file
         self.sr_keys = sr_keys
-        self.subdirs = ('INBOX', 'Old', 'Urgent')
+        self.subdirs = []
         self.speech = sr.Recognizer()
         self.cache = {}
         if os.path.isfile(stt_file):
@@ -172,10 +172,14 @@ class WatchMailBox(Thread):
                 self.cache = pickle.load(infile)
         self._save_cache()
         self.inot = inotify.adapters.Inotify()
-        for subdir in self.subdirs:
+        for subdir in ('INBOX', 'Old', 'Urgent'):
             directory = os.path.join(self.path, subdir)
             logging.debug("Watching Directory: %s", directory)
-            self.inot.add_watch(directory.encode('utf-8'))
+            if os.path.isdir(directory):
+                self.subdirs.append(subdir)
+                self.inot.add_watch(directory.encode('utf-8'))
+            else:
+                logging.debug("Directory %s not found", directory)
 
     def _save_cache(self):
         """Save cache data"""
