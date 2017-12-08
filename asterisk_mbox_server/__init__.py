@@ -61,19 +61,20 @@ class Connection(Thread):
         return result
 
     @staticmethod
-    def _build_cdr(entries, start=None, end=None, sha=None):
+    def _build_cdr(entries, start=0, count=-1, sha=None):
         """Extract requested info from cdr list."""
         if sha is not None:
             msg = decode_from_sha(sha)
-            start, end = [int(item) for item in msg.split(b',')]
+            start, count = [int(item) for item in msg.split(b',')]
         if not start or start < 0:
             start = 0
-        if start >= len(entries):
+        if start >= len(entries) or count == 0:
             return msg
-        if not end or end < 0 or end > len(entries):
+
+        if count < 0 or count + start > len(entries):
             end = len(entries)
-        if end < start:
-            end = start
+        else:
+            end = start + count
         return entries[start:end]
 
     def _send(self, command, msg):

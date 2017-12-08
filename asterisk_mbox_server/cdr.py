@@ -22,17 +22,27 @@ class WatchCDR(Thread):
         self._watch = None
         self._sql = None
         self._cdr_file = None
-        self._keys = None
         self._entries = []
+        self._datefield = 'calldate'
         if not cdr_path:
             # Disable CDR handling
-            pass
+            self._keymap = {}
         elif os.path.isfile(cdr_path):
             self._cdr_file = cdr_path
             self._header = ['accountcode', 'src', 'dst', 'dcontext', 'clid',
                             'channel', 'dstchannel', 'lastapp', 'lastdata',
                             'start', 'answer', 'end', 'duration', 'billsec',
                             'disposition', 'amaflags', 'uniqueid', 'userfield']
+            self._keymap = {
+                'time': 'start',
+                'callerid': 'clid',
+                'src': 'src',
+                'dest': 'lastdata',
+                'context': 'dcontext',
+                'application': 'lastapp',
+                'duration': 'duration',
+                'disposition': 'disposition',
+                }
             try:
                 if sys.platform.startswith('linux'):
                     import inotify.adapters
@@ -45,24 +55,57 @@ class WatchCDR(Thread):
             try:
                 self._sql = sqlalchemy.create_engine(
                     posixpath.dirname(cdr_path))
-                self._query = sqlalchemy.text("SELECT * from " +
-                                              posixpath.basename(cdr_path))
+                self._query = sqlalchemy.text(
+                    "SELECT * from {} ORDER BY `{}` DESC"
+                    .format(posixpath.basename(cdr_path), self._datefield))
             except sqlalchemy.exc.OperationalError as exception:
                 logging.error(exception)
+            self._keymap = {
+                'time': 'calldate',
+                'callerid': 'clid',
+                'src': 'src',
+                'dest': 'lastdata',
+                'context': 'dcontext',
+                'application': 'lastapp',
+                'duration': 'duration',
+                'disposition': 'disposition',
+                }
+        self._keys = list(self._keymap.keys())
+
+    def _update_entries(self, entries):
+        entries = [{key: e.get(origkey, "")
+                    for (key, origkey) in self._keymap.items()}
+                   for e in entries]
+        if (len(entries) == len(self._entries)
+                and (not entries or entries[0] == self._entries[0])):
+            return False
+        self._entries = entries
+        return True
+
+    def _read_cdr_from_sql(self):
+        result = self._sql.execute(self._query)
+        # This isn't thread safe, but since the values should
+        # virtually never change, is safe in reality.
+        # keys = [str(key) for key in result.keys()]
+        entries = [{key: str(value) for (key, value)
+                    in row.items()} for row in result]
+        return self._update_entries(entries)
 
     def _read_cdr_file(self):
         with open(self._cdr_file) as filp:
             lines = filp.readlines()
+            keys = None
             entries = csv.reader(lines, quotechar='"', delimiter=',',
                                  quoting=csv.QUOTE_ALL,
                                  skipinitialspace=True)
-            if entries and not self._keys:
+            if entries:
                 length = len(entries[0])
                 if length < len(self._header):
-                    self._keys = self._header[:length]
+                    keys = self._header[:length]
                 else:
-                    self._keys = self._header
-            self._entries = entries
+                    keys = self._header
+                entries = [dict(zip(keys, e[:len(keys)])) for e in entries]
+            return self._update_entries(reversed(entries))
 
     def _inotify_loop(self):
         updated = False
@@ -76,10 +119,11 @@ class WatchCDR(Thread):
                         updated = True
                 else:
                     if updated:
-                        self._read_cdr_file()
-                        logging.debug("Reloading CDR file due to event: %s",
-                                      type_names)
-                        self._cdr_queue.put("updated")
+                        if self._read_cdr_file():
+                            logging.debug(
+                                "Reloading CDR file due to event: %s",
+                                type_names)
+                            self._cdr_queue.put("updated")
                     updated = False
         finally:
             self._inot.remove_watch(self._cdr_file.encode('utf-8'))
@@ -92,19 +136,14 @@ class WatchCDR(Thread):
         last_mtime = 0
         while True:
             if self._sql:
-                result = self._sql.execute(self._query)
-                # This isn't thread safe, but since the values should
-                # virtually never change, is safe in reality.
-                self._keys = [str(key) for key in result.keys()]
-                self._entries = [{key: str(value) for (key, value)
-                                  in row.items()} for row in result]
-                self._cdr_queue.put("updated")
+                updated = self._read_cdr_from_sql()
             elif self._cdr_file:
                 mtime = os.path.getmtime(self._cdr_file)
                 if last_mtime != mtime:
-                    self._read_cdr_file()
+                    updated = self._read_cdr_file()
                     last_mtime = mtime
-                    self._cdr_queue.put("updated")
+            if updated:
+                self._cdr_queue.put("updated")
             time.sleep(self._sleep)
 
     def entries(self):
