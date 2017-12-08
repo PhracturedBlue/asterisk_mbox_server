@@ -28,7 +28,7 @@ class WatchMailBox(Thread):
         self.path = path
         self.stt_file = stt_file
         self.sr_keys = sr_keys
-        self.subdirs = ('INBOX', 'Old', 'Urgent')
+        self.subdirs = []
         self.speech = sr.Recognizer()
         self.status = {}
         self.cache = {}
@@ -39,10 +39,14 @@ class WatchMailBox(Thread):
                 self.cache = pickle.load(infile)
         self._save_cache()
         self.inot = inotify.adapters.Inotify()
-        for subdir in self.subdirs:
+        for subdir in ('INBOX', 'Old', 'Urgent'):
             directory = os.path.join(self.path, subdir)
-            logging.debug("Watching Directory: %s", directory)
-            self.inot.add_watch(directory.encode('utf-8'))
+            if os.path.isdir(directory):
+                self.subdirs.append(subdir)
+                logging.debug("Watching Directory: %s", directory)
+                self.inot.add_watch(directory.encode('utf-8'))
+            else:
+                logging.debug("Directory %s not found", directory)
 
     def _save_cache(self):
         """Save cache data."""
@@ -152,7 +156,7 @@ class WatchMailBox(Thread):
                 if base != os.path.join(dirname + "msg%04d" % (last_idx)):
                     for fil in glob.glob(base + ".*"):
                         ext = os.path.splitext(fil)[1]
-                        newfile = "msg%04d.%s" %(last_idx, ext)
+                        newfile = "msg%04d.%s" % (last_idx, ext)
                         logging.info("Renaming '" + fil + "' to '"
                                      + os.path.join(dirname, newfile) + "'")
                         rename.append(newfile)

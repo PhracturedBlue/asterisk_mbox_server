@@ -1,3 +1,4 @@
 inotify
 SpeechRecognition
+sqlalchemy
 asterisk_mbox

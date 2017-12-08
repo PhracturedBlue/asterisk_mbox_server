@@ -8,6 +8,7 @@ import logging
 import json
 import time
 import argparse
+import zlib
 
 from threading import Thread
 from asterisk_mbox_server.mbox import WatchMailBox
@@ -18,7 +19,7 @@ from asterisk_mbox.utils import (PollableQueue, recv_blocking,
                                  encode_password, compare_password,
                                  decode_from_sha)
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def _parse_request(msg):
@@ -60,20 +61,20 @@ class Connection(Thread):
         return result
 
     @staticmethod
-    def _build_cdr(cdr_list, start=None, end=None, sha=None):
+    def _build_cdr(entries, start=None, end=None, sha=None):
         """Extract requested info from cdr list."""
         if sha is not None:
             msg = decode_from_sha(sha)
             start, end = [int(item) for item in msg.split(b',')]
-        if start < 0:
+        if not start or start < 0:
             start = 0
-        if start >= len(cdr_list):
-            return []
-        if end <= 0 or end > len(cdr_list):
-            end = len(cdr_list)
+        if start >= len(entries):
+            return msg
+        if not end or end < 0 or end > len(entries):
+            end = len(entries)
         if end < start:
             end = start
-        return cdr_list[start:end]
+        return entries[start:end]
 
     def _send(self, command, msg):
         """Send message prefixed by length."""
@@ -112,12 +113,12 @@ class Connection(Thread):
                            "Could not find requested message")
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR_AVAILABLE:
             self._send(cmd.CMD_MESSAGE_CDR_AVAILABLE,
-                       json.dumps({'count': len(self.cdr.get_cdr_status())}))
+                       json.dumps({'count': self.cdr.count()}).encode('utf-8'))
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR:
-            cdr_list = self.cdr.get_cdr_status()
-            msg = self._build_cdr(cdr_list, sha=request['sha'])
+            entries = self._build_cdr(self.cdr.entries(), sha=request['sha'])
+            msg = {'keys': self.cdr.keys(), 'entries': entries}
             self._send(cmd.CMD_MESSAGE_CDR,
-                       json.dumps(msg).encode('utf-8'))
+                       zlib.compress(json.dumps(msg).encode('utf-8')))
 
     def run(self):
         """Thread main loop."""
@@ -140,9 +141,8 @@ class Connection(Thread):
                                json.dumps(self._build_msg_list())
                                .encode('utf-8'))
                 elif msgtype == 'cdr':
-                    cdr_len = len(self.cdr.get_cdr_list())
-                    self._send(cmd.CMD_MESAGE_CDR_AVAILABLE,
-                               json.dumps({'count': cdr_len})
+                    self._send(cmd.CMD_MESSAGE_CDR_AVAILABLE,
+                               json.dumps({'count': self.cdr.count()})
                                .encode('utf-8'))
 
 

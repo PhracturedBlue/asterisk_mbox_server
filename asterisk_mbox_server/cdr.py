@@ -23,8 +23,11 @@ class WatchCDR(Thread):
         self._sql = None
         self._cdr_file = None
         self._keys = None
-        self._entries = None
-        if os.path.isfile(cdr_path):
+        self._entries = []
+        if not cdr_path:
+            # Disable CDR handling
+            pass
+        elif os.path.isfile(cdr_path):
             self._cdr_file = cdr_path
             self._header = ['accountcode', 'src', 'dst', 'dcontext', 'clid',
                             'channel', 'dstchannel', 'lastapp', 'lastdata',
@@ -92,10 +95,11 @@ class WatchCDR(Thread):
                 result = self._sql.execute(self._query)
                 # This isn't thread safe, but since the values should
                 # virtually never change, is safe in reality.
-                self._keys = result.keys()
-                self._entries = result.fetchall()
+                self._keys = [str(key) for key in result.keys()]
+                self._entries = [{key: str(value) for (key, value)
+                                  in row.items()} for row in result]
                 self._cdr_queue.put("updated")
-            else:
+            elif self._cdr_file:
                 mtime = os.path.getmtime(self._cdr_file)
                 if last_mtime != mtime:
                     self._read_cdr_file()
@@ -103,9 +107,17 @@ class WatchCDR(Thread):
                     self._cdr_queue.put("updated")
             time.sleep(self._sleep)
 
-    def get_cdr_status(self):
+    def entries(self):
         """Retrieve current CDR log."""
-        return [self._keys, self._entries]
+        return self._entries
+
+    def keys(self):
+        """Retrieve CDR entity keys."""
+        return self._keys
+
+    def count(self):
+        """Retrieve number of current CDR entries."""
+        return len(self._entries)
 
     def queue(self):
         """Fetch queue object."""
