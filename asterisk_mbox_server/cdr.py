@@ -135,6 +135,7 @@ class WatchCDR(Thread):
             return
         last_mtime = 0
         while True:
+            updated = False
             if self._sql:
                 updated = self._read_cdr_from_sql()
             elif self._cdr_file:

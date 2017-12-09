@@ -19,7 +19,7 @@ from asterisk_mbox.utils import (PollableQueue, recv_blocking,
                                  encode_password, compare_password,
                                  decode_from_sha)
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 
 def _parse_request(msg):
@@ -113,9 +113,15 @@ class Connection(Thread):
                 self._send(cmd.CMD_MESSAGE_ERROR,
                            "Could not find requested message")
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR_AVAILABLE:
+            if not self.cdr:
+                self._send(cmd.CMD_MESSAGE_ERROR, b'CDR Not enabled')
+                return
             self._send(cmd.CMD_MESSAGE_CDR_AVAILABLE,
                        json.dumps({'count': self.cdr.count()}).encode('utf-8'))
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR:
+            if not self.cdr:
+                self._send(cmd.CMD_MESSAGE_ERROR, b'CDR Not enabled')
+                return
             entries = self._build_cdr(self.cdr.entries(), sha=request['sha'])
             msg = {'keys': self.cdr.keys(), 'entries': entries}
             self._send(cmd.CMD_MESSAGE_CDR,
@@ -165,10 +171,12 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
         self._mailbox.setDaemon(True)
         self._mailbox.start()
 
-        self._cdr = WatchCDR(self._opts['cdr'],
-                             self._opts['poll_interval'])
-        self._cdr.setDaemon(True)
-        self._cdr.start()
+        self._cdr = None
+        if self._opts['cdr']:
+            self._cdr = WatchCDR(self._opts['cdr'],
+                                 self._opts['poll_interval'])
+            self._cdr.setDaemon(True)
+            self._cdr.start()
 
         self._clients = []
 
@@ -265,7 +273,9 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
         timeout = 0
         last_time = 0
 
-        sockets = [self._soc, self._mailbox.queue(), self._cdr.queue()]
+        sockets = [self._soc, self._mailbox.queue()]
+        if self._cdr:
+            sockets.append(self._cdr.queue())
         while True:
             readable, _w, _e = select.select(sockets, [], [], timeout)
 
@@ -275,7 +285,7 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
             self._clients = [thread for thread in self._clients
                              if thread.isAlive()]
 
-            if self._cdr.queue() in readable:
+            if self._cdr and self._cdr.queue() in readable:
                 self._handle_cdr_update()
 
             timeout, last_time = self._handle_mbox_update(
