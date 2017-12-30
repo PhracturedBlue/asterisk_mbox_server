@@ -19,7 +19,7 @@ from asterisk_mbox.utils import (PollableQueue, recv_blocking,
                                  encode_password, compare_password,
                                  decode_from_sha)
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 
 def _parse_request(msg):
@@ -265,12 +265,12 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
             for thread in self._clients:
                 thread.queue().put('mbox')
             last_time = time.time()
-            timeout = 0
+            timeout = None
         return timeout, last_time
 
     def loop(self):
         """Run main thread."""
-        timeout = 0
+        timeout = None
         last_time = 0
 
         sockets = [self._soc, self._mailbox.queue()]
