@@ -44,7 +44,7 @@ class WatchMailBox(Thread):
             if os.path.isdir(directory):
                 self.subdirs.append(subdir)
                 logging.debug("Watching Directory: %s", directory)
-                self.inot.add_watch(directory.encode('utf-8'))
+                self.inot.add_watch(directory)
             else:
                 logging.debug("Directory %s not found", directory)
 
