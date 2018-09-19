@@ -8,8 +8,8 @@ mailbox directory for changes
 Dependencies
 ============
 
-* Linux ≥ 2.6.13
-* Python ≥ 3.4
+* Linux >= 2.6.13
+* Python >= 3.4
 * Lame
 
 Capabilities
@@ -20,10 +20,23 @@ Capabilities
 * Retrieve the audio of a message in MP3 format
 * Support both synchronous and asynchronous API
 
+Configuration
+=============
+Configuration is performed via the config.ini file
+
+Parameters
+----------
+* **host** *(Optional)*: The IP address to listen on for client requests. This defaults to all IP addresses on the server. To listen only locally, choose 127.0.0.1
+* **port** *(Optional)*: The port to listen on for client requests. Defaults to 12345.
+* **password** *(Required)*: A password shared between client and server. Use only alpha-numeric characters and spaces
+* **mbox_path** *(Required)*: The path to the storage location of mailbox files. This is typically /var/spool/asterisk/voicemail/default/<mailbox>/
+* **cache_file** *(Required)*: A fully-qualified path to a file thht can be written by the server containing transcriptions of voicemails. Example: /var/spool/asterisk/transcription.cache
+* **google_key** *(Required)*: Your 40 characters Google API key.
+* **cdr** *(Optional)*: Where to find CDR data.  Supports various SQL databases as well as a file log.
+
 Future work
 ============
 
-* Support deleting messages
 * Support moving messages
 * Support multiple mailboxes
 * Support alternate text-to-speech providers

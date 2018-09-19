@@ -34,9 +34,10 @@ setup(
   keywords = ['testing', 'asterisk' 'mailbox', 'voicemail'], # arbitrary keywords
   classifiers = [],
   install_requires=[
-        "inotify",
+        "inotify>=0.2",
         "SpeechRecognition",
         "asterisk_mbox",
+        "sqlalchemy"
    ],
    entry_points = {
         'console_scripts': [

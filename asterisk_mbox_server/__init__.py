@@ -19,7 +19,7 @@ from asterisk_mbox.utils import (PollableQueue, recv_blocking,
                                  encode_password, compare_password,
                                  decode_from_sha)
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 
 def _parse_request(msg):

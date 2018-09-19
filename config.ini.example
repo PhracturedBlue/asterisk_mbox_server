@@ -5,3 +5,4 @@ password = This is my password
 mbox_path = /var/spool/asterisk/voicemail/default/vm/
 cache_file = stt.pkl
 google_key = <40 charachter API key>
+cdr = mysql://user:password@localhost/asterisk/cdr
