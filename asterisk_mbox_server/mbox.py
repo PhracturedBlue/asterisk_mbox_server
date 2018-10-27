@@ -139,6 +139,7 @@ class WatchMailBox(Thread):
         # This does introduce a race condition between
         # Asterisk resequencing and us deleting, but there isn't
         # much we can do about it
+        print('trying to delete message')
         self.lock.acquire()
         self._build_mbox_status()
         fname = self._sha_to_fname(sha)
@@ -149,24 +150,29 @@ class WatchMailBox(Thread):
         for fil in glob.iglob(os.path.join(dirname + "msg[0-9]*")):
             base, = os.path.splitext(fil)
             paths[base] = None
-        last_idx = 0
-        rename = []
-        with tempfile.TemporaryDirectory(dir=dirname) as tmp:
-            for base in sorted(paths):
-                if base != os.path.join(dirname + "msg%04d" % (last_idx)):
-                    for fil in glob.glob(base + ".*"):
-                        ext = os.path.splitext(fil)[1]
-                        newfile = "msg%04d.%s" % (last_idx, ext)
-                        logging.info("Renaming '" + fil + "' to '"
-                                     + os.path.join(dirname, newfile) + "'")
-                        rename.append(newfile)
-                        os.link(fil, os.path.join(tempfile, newfile))
-            for fil in rename:
-                finalname = os.path.join(dirname, fil)
-                if os.path.lexists(finalname):
-                    os.unlink(finalname)
-                os.rename(os.path.join(tmp, fil), finalname)
-        self.lock.release()
+        self._build_mbox_status()
+        #last_idx = 0
+        #rename = []
+        #with tempfile.TemporaryDirectory(dir=dirname) as tmp:
+        #    for base in sorted(paths):
+        #        if base != os.path.join(dirname + "msg%04d" % (last_idx)):
+        #            for fil in glob.glob(base + ".*"):
+        #                ext = os.path.splitext(fil)[1]
+        #                newfile = "msg%04d.%s" % (last_idx, ext)
+        #                logging.info("Renaming '" + fil + "' to '"
+        #                             + os.path.join(dirname, newfile) + "'")
+        #                print("Renaming '" + fil + "' to '"
+        #                             + os.path.join(dirname, newfile) + "'")
+        #                rename.append(newfile)
+        #                os.link(fil, os.path.join(tempfile, newfile))
+        #    for fil in rename:
+        #        print(fil)
+        #        finalname = os.path.join(dirname, fil)
+        #        if os.path.lexists(finalname):
+        #            os.unlink(finalname)
+        #        os.rename(os.path.join(tmp, fil), finalname)
+        #self.lock.release()
+        #self._build_mbox_status()
 
     def mp3(self, sha):
         """Convert WAV to MP3 using LAME."""
