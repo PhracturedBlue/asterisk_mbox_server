@@ -283,7 +283,7 @@ class AsteriskMboxServer:  # pylint: disable=too-few-public-methods
                 self._connection()
 
             self._clients = [thread for thread in self._clients
-                             if thread.isAlive()]
+                             if thread.is_alive()]
 
             if self._cdr and self._cdr.queue() in readable:
                 self._handle_cdr_update()
