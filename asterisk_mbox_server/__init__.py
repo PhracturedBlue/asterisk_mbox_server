@@ -79,14 +79,16 @@ class Connection(Thread):
 
     def _send(self, command, msg):
         """Send message prefixed by length."""
+        print('SEND command %s' % (command))
         msglen = len(msg)
         msglen = bytes([msglen >> 24,
                         0xff & (msglen >> 16),
                         0xff & (msglen >> 8),
                         0xff & (msglen >> 0)])
-        self.conn.send(bytes([command]) + msglen + msg)
+        self.conn.send(bytes([command]) + bytes(msglen) + bytes(msg))
 
     def _handle_request(self, request):
+        print(request)
         if request['cmd'] == cmd.CMD_MESSAGE_PASSWORD:
             self.accept_pw, msg = compare_password(self.password,
                                                    request['sha'])
@@ -112,6 +114,10 @@ class Connection(Thread):
                 logging.warning("Couldn't find message for %s", request['sha'])
                 self._send(cmd.CMD_MESSAGE_ERROR,
                            "Could not find requested message")
+        elif request['cmd'] == cmd.CMD_MESSAGE_DELETE:
+            msg = self.mbox.delete(request['sha'])
+            self._send(cmd.CMD_MESSAGE_LIST,
+                       json.dumps(self._build_msg_list()).encode('utf-8'))
         elif request['cmd'] == cmd.CMD_MESSAGE_CDR_AVAILABLE:
             if not self.cdr:
                 self._send(cmd.CMD_MESSAGE_ERROR, b'CDR Not enabled')
@@ -123,9 +129,17 @@ class Connection(Thread):
                 self._send(cmd.CMD_MESSAGE_ERROR, b'CDR Not enabled')
                 return
             entries = self._build_cdr(self.cdr.entries(), sha=request['sha'])
-            msg = {'keys': self.cdr.keys(), 'entries': entries}
-            self._send(cmd.CMD_MESSAGE_CDR,
-                       zlib.compress(json.dumps(msg).encode('utf-8')))
+            try:
+                msg = {'keys': self.cdr.keys(), 'entries': entries.decode('utf-8')}
+            except:
+                msg = {'keys': self.cdr.keys(), 'entries': entries}
+            try:
+                for entry in entries:
+                    if entry['time'] == '':
+                        logging.exception('No timestamp for this: %s' % (entry))
+            except:
+                asdf = ''
+            self._send(cmd.CMD_MESSAGE_CDR, zlib.compress(json.dumps(msg).encode('utf-8')))
 
     def run(self):
         """Thread main loop."""

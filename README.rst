@@ -40,3 +40,10 @@ Future work
 * Support moving messages
 * Support multiple mailboxes
 * Support alternate text-to-speech providers
+
+
+Problems
+============
+On Home Assistant there might be a problem reading the CDR file because of missing time.
+I fixed it by changing the code `/usr/local/lib/python3.6/dist-packages/homeassistant/components/mailbox/asterisk_cdr.py`.
+I added a **try** **except** on the _build_message method.

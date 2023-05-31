@@ -47,7 +47,7 @@ class WatchCDR(Thread):
                 if sys.platform.startswith('linux'):
                     import inotify.adapters
                     self._inot = inotify.adapters.Inotify()
-                    self._inot.add_watch(self._cdr_file.encode('utf-8'))
+                    self._inot.add_watch(self._cdr_file)
             finally:
                 pass
         else:
@@ -95,9 +95,9 @@ class WatchCDR(Thread):
         with open(self._cdr_file) as filp:
             lines = filp.readlines()
             keys = None
-            entries = csv.reader(lines, quotechar='"', delimiter=',',
+            entries = list(csv.reader(lines, quotechar='"', delimiter=',',
                                  quoting=csv.QUOTE_ALL,
-                                 skipinitialspace=True)
+                                 skipinitialspace=True))
             if entries:
                 length = len(entries[0])
                 if length < len(self._header):
